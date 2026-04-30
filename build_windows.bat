@@ -1,11 +1,16 @@
 @echo off
-echo Instalando PyInstaller...
-pip install pyinstaller
+echo Instalando dependencias...
+pip install pyinstaller pillow -q
 
-echo.
+echo Gerando icone...
+python create_icon.py
+
 echo Compilando executavel...
 pyinstaller --onefile --windowed ^
     --name "PomodoroInteligente" ^
+    --icon "pomodoro.ico" ^
+    --add-data "pomodoro.ico;." ^
+    --add-data "logo.png;." ^
     --hidden-import "pystray._win32" ^
     --hidden-import "pynput.keyboard._win32" ^
     --hidden-import "pynput.mouse._win32" ^

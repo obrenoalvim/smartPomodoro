@@ -30,6 +30,10 @@ ehthumbs.db
 
 # PyInstaller
 *.spec
+Output/
+
+# Generated assets
+pomodoro.ico
 
 # Project-specific
 .superpowers/

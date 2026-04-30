@@ -12,6 +12,7 @@ Permissões pynput (se não funcionar):
 """
 
 import os
+import sys
 import json
 import time
 import enum
@@ -20,6 +21,11 @@ import subprocess
 import threading
 import tkinter as tk
 from tkinter import messagebox
+
+def _resource(rel):
+    """Resolve caminho de recurso — dev ou bundle PyInstaller."""
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, rel)
 
 try:
     from pynput import mouse, keyboard
@@ -579,6 +585,13 @@ class PomodoroApp(tk.Tk):
         self.resizable(False, False)
         self.configure(bg=COR_BG)
         self.protocol("WM_DELETE_WINDOW", self._ao_fechar)
+        try:
+            from PIL import ImageTk, Image as PilImage
+            img = PilImage.open(_resource("logo.png")).resize((64, 64), PilImage.LANCZOS)
+            self._icon_img = ImageTk.PhotoImage(img)
+            self.iconphoto(True, self._icon_img)
+        except Exception:
+            pass
 
     def _ao_fechar(self):
         self.sair()
