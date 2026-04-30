@@ -150,5 +150,183 @@ class ActivityMonitor:
         return self._ativo
 
 
+# ─── TimerEngine ──────────────────────────────────────────────────────────────
+class TimerEngine:
+    """
+    Máquina de estados do timer. Roda em thread separada.
+    Callbacks chamados na thread do engine — usar root.after() para UI.
+    """
+
+    def __init__(self, config: ConfigManager, monitor: ActivityMonitor):
+        self._cfg = config
+        self._monitor = monitor
+        self._estado = Estado.FOCO
+        self._estado_anterior = Estado.FOCO
+        self._thread = None
+        self._stop_evt = threading.Event()
+        self._pause_evt = threading.Event()
+        self._pause_evt.set()  # começa não-pausado
+
+        self._segundos_restantes = 0
+        self._segundos_extra = 0
+        self._lock = threading.Lock()
+
+        # Callbacks (atribuídos pela PomodoroApp)
+        self.on_tick = None            # (estado, seg_restantes, seg_extra)
+        self.on_inicio_extensao = None # ()
+        self.on_notificar_descanso = None  # (seg_extra)
+        self.on_fim_descanso = None    # ()
+
+    # ── Propriedades ──────────────────────────────────────────────────────────
+    @property
+    def estado(self):
+        with self._lock:
+            return self._estado
+
+    @property
+    def segundos_restantes(self):
+        with self._lock:
+            return self._segundos_restantes
+
+    @property
+    def segundos_extra(self):
+        with self._lock:
+            return self._segundos_extra
+
+    # ── Controle ──────────────────────────────────────────────────────────────
+    def iniciar_foco(self):
+        self._parar_thread()
+        with self._lock:
+            self._estado = Estado.FOCO
+            self._segundos_restantes = int(self._cfg.get("foco_minutos") * 60)
+            self._segundos_extra = 0
+        self._stop_evt.clear()
+        self._pause_evt.set()
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+
+    def pausar(self):
+        with self._lock:
+            if self._estado in (Estado.FOCO, Estado.EXTENSAO, Estado.DESCANSO):
+                self._estado_anterior = self._estado
+                self._pause_evt.clear()
+                self._estado = Estado.PAUSADO
+
+    def retomar(self):
+        with self._lock:
+            if self._estado == Estado.PAUSADO:
+                self._estado = self._estado_anterior
+        self._pause_evt.set()
+
+    def resetar(self):
+        self._parar_thread()
+        with self._lock:
+            self._estado = Estado.FOCO
+            self._segundos_restantes = int(self._cfg.get("foco_minutos") * 60)
+            self._segundos_extra = 0
+
+    def iniciar_descanso(self, segundos_extra):
+        self._parar_thread()
+        bonus = int(segundos_extra * self._cfg.get("fator_bonus"))
+        base  = int(self._cfg.get("descanso_base_minutos") * 60)
+        with self._lock:
+            self._estado = Estado.DESCANSO
+            self._segundos_restantes = base + bonus
+            self._segundos_extra = 0
+        self._stop_evt.clear()
+        self._pause_evt.set()
+        self._thread = threading.Thread(target=self._loop_descanso, daemon=True)
+        self._thread.start()
+
+    def _parar_thread(self):
+        self._stop_evt.set()
+        self._pause_evt.set()  # desbloqueia se pausado
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=2)
+
+    # ── Loop principal (FOCO → EXTENSAO) ──────────────────────────────────────
+    def _loop(self):
+        inatividade_limite = self._cfg.get("inatividade_segundos")
+
+        # Fase FOCO: contagem regressiva
+        while not self._stop_evt.is_set():
+            self._pause_evt.wait()
+            if self._stop_evt.is_set():
+                break
+            with self._lock:
+                if self._segundos_restantes <= 0:
+                    break
+                self._segundos_restantes -= 1
+                snap_estado = self._estado
+                snap_rest   = self._segundos_restantes
+                snap_extra  = self._segundos_extra
+            if self.on_tick:
+                self.on_tick(snap_estado, snap_rest, snap_extra)
+            self._stop_evt.wait(1)
+
+        if self._stop_evt.is_set():
+            return
+
+        # Timer zerou — verificar atividade
+        inativo = self._monitor.segundos_inativo
+        if inativo >= inatividade_limite:
+            # Já estava inativo — notificar imediatamente
+            if self.on_notificar_descanso:
+                self.on_notificar_descanso(0)
+            return
+
+        # Usuário ativo → EXTENSAO silenciosa
+        with self._lock:
+            self._estado = Estado.EXTENSAO
+            self._estado_anterior = Estado.EXTENSAO
+        if self.on_inicio_extensao:
+            self.on_inicio_extensao()
+
+        while not self._stop_evt.is_set():
+            self._pause_evt.wait()
+            if self._stop_evt.is_set():
+                break
+            with self._lock:
+                self._segundos_extra += 1
+                snap_estado = self._estado
+                snap_rest   = self._segundos_restantes
+                snap_extra  = self._segundos_extra
+            if self.on_tick:
+                self.on_tick(snap_estado, snap_rest, snap_extra)
+
+            inativo = self._monitor.segundos_inativo
+            if inativo >= inatividade_limite:
+                # Usuário parou — notificar
+                with self._lock:
+                    seg_extra = self._segundos_extra
+                if self.on_notificar_descanso:
+                    self.on_notificar_descanso(seg_extra)
+                return
+
+            self._stop_evt.wait(1)
+
+    # ── Loop descanso ─────────────────────────────────────────────────────────
+    def _loop_descanso(self):
+        while not self._stop_evt.is_set():
+            self._pause_evt.wait()
+            if self._stop_evt.is_set():
+                break
+            with self._lock:
+                if self._segundos_restantes <= 0:
+                    break
+                self._segundos_restantes -= 1
+                snap_estado = self._estado
+                snap_rest   = self._segundos_restantes
+                snap_extra  = self._segundos_extra
+            if self.on_tick:
+                self.on_tick(snap_estado, snap_rest, snap_extra)
+            self._stop_evt.wait(1)
+
+        if self._stop_evt.is_set():
+            return
+        if self.on_fim_descanso:
+            self.on_fim_descanso()
+
+
 if __name__ == "__main__":
     print("Módulo carregado com sucesso.")
