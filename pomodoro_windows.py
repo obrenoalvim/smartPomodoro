@@ -12,7 +12,7 @@ import time
 import enum
 import threading
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import messagebox
 try:
     import winsound
     WINSOUND_OK = True
@@ -47,12 +47,15 @@ CONFIG_DEFAULT = {
     "som_ativado": True,
     "minimizar_para_tray": True,
 }
-COR_FOCO     = "#4CAF50"
-COR_EXTENSAO = "#FF9800"
-COR_DESCANSO = "#2196F3"
-COR_PAUSADO  = "#9E9E9E"
-COR_BG       = "#1E1E2E"
-COR_FG       = "#CDD6F4"
+COR_BG       = "#1C1C1E"
+COR_SURFACE  = "#2C2C2E"
+COR_BORDER   = "#3A3A3C"
+COR_FG       = "#EBEBF5"
+COR_FG2      = "#8E8E93"
+COR_FOCO     = "#0A84FF"
+COR_EXTENSAO = "#FF9F0A"
+COR_DESCANSO = "#30D158"
+COR_PAUSADO  = "#636366"
 
 class Estado(enum.Enum):
     FOCO     = "foco"
@@ -421,54 +424,79 @@ class NotificationWindow(tk.Toplevel):
         return f"{s // 60:02d}:{s % 60:02d}"
 
     def _construir_ui(self, seg_extra, bonus_seg, base_seg):
-        self.title("Hora de descansar!")
+        self.title("Pomodoro")
         self.configure(bg=COR_BG)
+        self.geometry("280x340")
 
-        pad = {"padx": 20, "pady": 8}
+        # Titlebar
+        bar = tk.Frame(self, bg=COR_SURFACE, height=36)
+        bar.pack(fill="x")
+        bar.pack_propagate(False)
+        tk.Label(bar, text="Hora de descansar",
+                 font=("Segoe UI", 9, "bold"),
+                 bg=COR_SURFACE, fg=COR_FG2).pack(expand=True)
+        tk.Frame(self, bg=COR_BORDER, height=1).pack(fill="x")
 
-        tk.Label(self, text="🎉 Ótimo trabalho!", font=("Segoe UI", 16, "bold"),
-                 bg=COR_BG, fg=COR_FG).pack(**pad)
+        body = tk.Frame(self, bg=COR_BG)
+        body.pack(fill="both", expand=True, padx=14, pady=(10, 14))
 
-        foco_min  = seg_extra // 60
-        foco_seg  = seg_extra % 60
-        bonus_min = bonus_seg // 60
-        bonus_sec = bonus_seg % 60
-        base_min  = base_seg  // 60
+        tk.Label(body, text="🎉", font=("Segoe UI", 22),
+                 bg=COR_BG).pack()
+        tk.Label(body, text="Ótimo trabalho!",
+                 font=("Segoe UI", 12, "bold"),
+                 bg=COR_BG, fg=COR_FG).pack(pady=(2, 0))
 
-        info = (
-            f"Você trabalhou:\n"
-            f"  {self._cfg.get('foco_minutos')} min + "
-            f"{foco_min}m{foco_seg:02d}s extras"
+        foco_min = seg_extra // 60
+        foco_seg = seg_extra % 60
+        info = (f"{self._cfg.get('foco_minutos')} min foco\n"
+                f"+ {foco_min}m{foco_seg:02d}s extra")
+        tk.Label(body, text=info, font=("Segoe UI", 9),
+                 bg=COR_BG, fg=COR_FG2, justify="center").pack(pady=(2, 8))
+
+        self._canvas = tk.Canvas(body, width=160, height=120,
+                                  bg=COR_BG, highlightthickness=0)
+        self._canvas.pack()
+        self._desenhar_mini_anel(self._total)
+
+        tk.Button(body, text="Começar descanso",
+                  font=("Segoe UI", 10, "bold"),
+                  bg=COR_DESCANSO, fg="white", relief="flat", bd=0,
+                  activebackground="#28b84e", activeforeground="white",
+                  command=self._iniciar).pack(fill="x", ipady=7, pady=(10, 5))
+
+        tk.Button(body, text="Pular",
+                  font=("Segoe UI", 9),
+                  bg=COR_BG, fg=COR_PAUSADO, relief="flat", bd=0,
+                  highlightbackground=COR_BORDER, highlightthickness=1,
+                  activebackground=COR_BORDER, activeforeground=COR_FG,
+                  command=self._pular).pack(fill="x", ipady=5)
+
+    def _desenhar_mini_anel(self, restante):
+        pct = (restante / self._total) if self._total else 0
+        cx, cy, r, w = 80, 60, 48, 7
+
+        self._canvas.delete("all")
+
+        self._canvas.create_arc(
+            cx - r, cy - r, cx + r, cy + r,
+            start=90, extent=-359.9, style="arc",
+            outline=COR_BORDER, width=w,
         )
-        tk.Label(self, text=info, font=("Segoe UI", 11),
-                 bg=COR_BG, fg=COR_FG, justify="left").pack(**pad)
 
-        tk.Label(self, text="Tempo de descanso:", font=("Segoe UI", 11),
-                 bg=COR_BG, fg=COR_FG).pack(pady=(12, 2))
+        extent = -max(int(pct * 359.9), 1) if pct > 0 else 0
+        if extent:
+            self._canvas.create_arc(
+                cx - r, cy - r, cx + r, cy + r,
+                start=90, extent=extent, style="arc",
+                outline=COR_DESCANSO, width=w,
+            )
 
-        self._prog = ttk.Progressbar(self, length=240, maximum=self._total,
-                                     value=self._total, mode="determinate")
-        self._prog.pack(padx=20, pady=4)
-
-        self._lbl_timer = tk.Label(self, text=self._fmt(self._total),
-                                   font=("Segoe UI", 28, "bold"),
-                                   bg=COR_BG, fg=COR_DESCANSO)
-        self._lbl_timer.pack(**pad)
-
-        detalhe = (
-            f"({base_min} min base + "
-            f"{bonus_min}m{bonus_sec:02d}s bônus)"
-        )
-        tk.Label(self, text=detalhe, font=("Segoe UI", 9),
-                 bg=COR_BG, fg="#888").pack(pady=(0, 12))
-
-        tk.Button(self, text="  Começar descanso  ", font=("Segoe UI", 11),
-                  bg=COR_DESCANSO, fg="white", relief="flat",
-                  command=self._iniciar).pack(padx=20, pady=4, fill="x")
-
-        tk.Button(self, text="Pular", font=("Segoe UI", 10),
-                  bg="#333", fg=COR_FG, relief="flat",
-                  command=self._pular).pack(padx=20, pady=(0, 16), fill="x")
+        self._canvas.create_text(cx, cy - 16, text="DESCANSO",
+                                  font=("Segoe UI", 7, "bold"),
+                                  fill=COR_DESCANSO)
+        self._canvas.create_text(cx, cy + 8, text=self._fmt(restante),
+                                  font=("Segoe UI", 20),
+                                  fill="#FFFFFF")
 
     def _centralizar(self):
         self.update_idletasks()
@@ -490,15 +518,14 @@ class NotificationWindow(tk.Toplevel):
             return
         if self._restante > 0:
             self._restante -= 1
-            self._lbl_timer.config(text=self._fmt(self._restante))
-            self._prog.config(value=self._restante)
+            self._desenhar_mini_anel(self._restante)
             self.after(1000, self._tick)
         else:
             self._concluir()
 
     def _concluir(self):
         self._rodando = False
-        self._lbl_timer.config(text="00:00", fg=COR_FOCO)
+        self._desenhar_mini_anel(0)
         messagebox.showinfo("Pomodoro", "Pronto para focar novamente! 🍅",
                             parent=self)
         self.destroy()
@@ -540,7 +567,7 @@ class PomodoroApp(tk.Tk):
     # ── Janela ────────────────────────────────────────────────────────────────
     def _configurar_janela(self):
         self.title(APP_NAME)
-        self.geometry("320x420")
+        self.geometry("300x340")
         self.resizable(False, False)
         self.configure(bg=COR_BG)
         self.protocol("WM_DELETE_WINDOW", self._ao_fechar)
@@ -562,71 +589,161 @@ class PomodoroApp(tk.Tk):
 
     # ── UI ────────────────────────────────────────────────────────────────────
     def _construir_ui(self):
-        tk.Label(self, text=f"🍅 {APP_NAME}", font=("Segoe UI", 13, "bold"),
-                 bg=COR_BG, fg=COR_FG).pack(pady=(12, 4))
+        # Titlebar
+        bar = tk.Frame(self, bg=COR_SURFACE, height=36)
+        bar.pack(fill="x")
+        bar.pack_propagate(False)
+        tk.Label(bar, text=f"🍅 {APP_NAME}",
+                 font=("Segoe UI", 9, "bold"),
+                 bg=COR_SURFACE, fg=COR_FG2).pack(side="left", expand=True)
+        self._btn_gear = tk.Button(
+            bar, text="⚙", font=("Segoe UI", 12),
+            bg=COR_SURFACE, fg=COR_FG2, relief="flat", bd=0,
+            activebackground=COR_SURFACE, activeforeground=COR_FG,
+            command=self._toggle_config, cursor="hand2",
+        )
+        self._btn_gear.pack(side="right", padx=8)
+        tk.Frame(self, bg=COR_BORDER, height=1).pack(fill="x")
 
-        self._frame_timer = tk.Frame(self, bg=COR_BG, bd=2, relief="groove")
-        self._frame_timer.pack(fill="x", padx=16, pady=8)
+        # Ring canvas
+        self._canvas = tk.Canvas(self, width=300, height=170,
+                                  bg=COR_BG, highlightthickness=0)
+        self._canvas.pack()
 
-        self._lbl_estado = tk.Label(self._frame_timer, text="FOCO",
-                                    font=("Segoe UI", 11, "bold"),
-                                    bg=COR_BG, fg=COR_FOCO)
-        self._lbl_estado.pack(pady=(10, 2))
-
-        self._lbl_tempo = tk.Label(self._frame_timer, text="25:00",
-                                   font=("Segoe UI", 36, "bold"),
-                                   bg=COR_BG, fg=COR_FOCO)
-        self._lbl_tempo.pack()
-
-        self._prog = ttk.Progressbar(self._frame_timer, length=260,
-                                     maximum=100, value=100,
-                                     mode="determinate")
-        self._prog.pack(pady=(4, 8), padx=12)
-
-        self._lbl_extra = tk.Label(self._frame_timer, text="",
-                                   font=("Segoe UI", 9),
-                                   bg=COR_BG, fg=COR_EXTENSAO)
-        self._lbl_extra.pack(pady=(0, 8))
-
+        # Buttons
         frame_btn = tk.Frame(self, bg=COR_BG)
-        frame_btn.pack(pady=4)
-        self._btn_pausar = tk.Button(frame_btn, text="  Pausar  ",
-                                     font=("Segoe UI", 10),
-                                     bg="#333", fg=COR_FG, relief="flat",
-                                     command=self.toggle_pausa)
-        self._btn_pausar.pack(side="left", padx=6)
-        tk.Button(frame_btn, text="  Resetar  ", font=("Segoe UI", 10),
-                  bg="#333", fg=COR_FG, relief="flat",
-                  command=self.resetar).pack(side="left", padx=6)
+        frame_btn.pack(pady=(0, 12), padx=14, fill="x")
+        self._btn_pausar = tk.Button(
+            frame_btn, text="Pausar",
+            font=("Segoe UI", 9, "bold"),
+            bg=COR_SURFACE, fg=COR_FG, relief="flat", bd=0,
+            highlightbackground=COR_BORDER, highlightthickness=1,
+            activebackground=COR_BORDER, activeforeground=COR_FG,
+            command=self.toggle_pausa,
+        )
+        self._btn_pausar.pack(side="left", expand=True, fill="x",
+                               padx=(0, 4), ipady=6)
+        tk.Button(
+            frame_btn, text="Resetar",
+            font=("Segoe UI", 9, "bold"),
+            bg=COR_SURFACE, fg=COR_FG, relief="flat", bd=0,
+            highlightbackground=COR_BORDER, highlightthickness=1,
+            activebackground=COR_BORDER, activeforeground=COR_FG,
+            command=self.resetar,
+        ).pack(side="left", expand=True, fill="x", padx=(4, 0), ipady=6)
 
-        ttk.Separator(self, orient="horizontal").pack(fill="x", padx=16, pady=8)
-
-        tk.Label(self, text="Configurações", font=("Segoe UI", 10, "bold"),
-                 bg=COR_BG, fg=COR_FG).pack(anchor="w", padx=16)
+        # Config frame (collapsible)
+        self._config_visivel = False
+        self._frame_cfg = tk.Frame(self, bg=COR_SURFACE,
+                                    highlightbackground=COR_BORDER,
+                                    highlightthickness=1)
+        tk.Label(self._frame_cfg, text="CONFIGURAÇÕES",
+                 font=("Segoe UI", 7, "bold"),
+                 bg=COR_SURFACE, fg=COR_FG2).pack(anchor="w", padx=10, pady=(8, 4))
 
         self._vars_cfg = {}
         campos = [
-            ("foco_minutos",          "Foco (min):"),
-            ("descanso_base_minutos", "Descanso (min):"),
-            ("fator_bonus",           "Fator bônus:"),
-            ("inatividade_segundos",  "Inatividade (s):"),
+            ("foco_minutos",          "Foco (min)"),
+            ("descanso_base_minutos", "Descanso (min)"),
+            ("inatividade_segundos",  "Inatividade (s)"),
+            ("fator_bonus",           "Fator bônus"),
         ]
-        frame_cfg = tk.Frame(self, bg=COR_BG)
-        frame_cfg.pack(fill="x", padx=16, pady=4)
-
         for chave, label in campos:
-            row = tk.Frame(frame_cfg, bg=COR_BG)
-            row.pack(fill="x", pady=2)
+            row = tk.Frame(self._frame_cfg, bg=COR_SURFACE)
+            row.pack(fill="x", padx=10, pady=2)
             tk.Label(row, text=label, font=("Segoe UI", 9),
-                     bg=COR_BG, fg=COR_FG, width=18, anchor="w").pack(side="left")
+                     bg=COR_SURFACE, fg=COR_FG2).pack(side="left")
             var = tk.StringVar(value=str(self._cfg.get(chave)))
             self._vars_cfg[chave] = var
-            entry = tk.Entry(row, textvariable=var, width=7,
-                             font=("Segoe UI", 9), bg="#333", fg=COR_FG,
-                             insertbackground=COR_FG, relief="flat")
-            entry.pack(side="left")
+            entry = tk.Entry(row, textvariable=var, width=6,
+                             font=("Segoe UI", 9), bg=COR_BORDER, fg=COR_FG,
+                             insertbackground=COR_FG, relief="flat",
+                             highlightthickness=0)
+            entry.pack(side="right")
             entry.bind("<FocusOut>", lambda e, k=chave: self._salvar_campo(k))
             entry.bind("<Return>",   lambda e, k=chave: self._salvar_campo(k))
+        tk.Frame(self._frame_cfg, bg=COR_SURFACE, height=8).pack()
+
+        # Initial ring draw
+        total = int(self._cfg.get("foco_minutos") * 60)
+        self._desenhar_anel(Estado.FOCO, 1.0, self._fmt(total), "FOCO")
+
+    def _desenhar_anel(self, estado, pct, texto, chip_label):
+        cores = {
+            Estado.FOCO:     COR_FOCO,
+            Estado.EXTENSAO: COR_EXTENSAO,
+            Estado.DESCANSO: COR_DESCANSO,
+            Estado.PAUSADO:  COR_PAUSADO,
+        }
+        cor = cores.get(estado, COR_PAUSADO)
+        cx, cy, r, w = 150, 87, 68, 9
+
+        self._canvas.delete("all")
+
+        # Track (full grey ring)
+        self._canvas.create_arc(
+            cx - r, cy - r, cx + r, cy + r,
+            start=90, extent=-359.9, style="arc",
+            outline=COR_BORDER, width=w,
+        )
+
+        # Fill arc
+        if estado == Estado.EXTENSAO:
+            # Accumulating amber arc growing clockwise as extra seconds increase
+            max_ext = 600
+            ext_pct = min(pct / max_ext, 1.0) if max_ext > 0 else 0
+            extent = -max(int(ext_pct * 359.9), 1) if pct > 0 else 0
+            if extent:
+                self._canvas.create_arc(
+                    cx - r, cy - r, cx + r, cy + r,
+                    start=90, extent=extent, style="arc",
+                    outline=cor, width=w,
+                )
+        else:
+            extent = -max(int(pct * 359.9), 1) if pct > 0 else 0
+            if extent:
+                self._canvas.create_arc(
+                    cx - r, cy - r, cx + r, cy + r,
+                    start=90, extent=extent, style="arc",
+                    outline=cor, width=w,
+                )
+
+        # Chip label (state name)
+        self._canvas.create_text(
+            cx, cy - 24,
+            text=chip_label,
+            font=("Segoe UI", 8, "bold"),
+            fill=cor,
+        )
+
+        # Timer number
+        timer_y = cy + 4 if estado != Estado.EXTENSAO else cy
+        self._canvas.create_text(
+            cx, timer_y,
+            text=texto,
+            font=("Segoe UI", 28),
+            fill="#FFFFFF",
+        )
+
+        # Sub-text only for extension state
+        if estado == Estado.EXTENSAO:
+            self._canvas.create_text(
+                cx, cy + 26,
+                text="além do foco",
+                font=("Segoe UI", 8),
+                fill=COR_EXTENSAO,
+            )
+
+    def _toggle_config(self):
+        if self._config_visivel:
+            self._frame_cfg.pack_forget()
+            self.geometry("300x340")
+            self._btn_gear.config(fg=COR_FG2)
+        else:
+            self._frame_cfg.pack(fill="x", padx=14, pady=(0, 14))
+            self.geometry("300x460")
+            self._btn_gear.config(fg=COR_FOCO)
+        self._config_visivel = not self._config_visivel
 
     def _salvar_campo(self, chave):
         try:
@@ -657,49 +774,33 @@ class PomodoroApp(tk.Tk):
 
     # ── Aplicadores de estado na UI (thread UI) ───────────────────────────────
     def _aplicar_tick(self, estado, seg_rest, seg_extra):
-        cores = {
-            Estado.FOCO:     COR_FOCO,
-            Estado.EXTENSAO: COR_EXTENSAO,
-            Estado.DESCANSO: COR_DESCANSO,
-            Estado.PAUSADO:  COR_PAUSADO,
-        }
         labels = {
             Estado.FOCO:     "FOCO",
-            Estado.EXTENSAO: "⚡ EXTENDENDO",
+            Estado.EXTENSAO: "⚡ EXTRA",
             Estado.DESCANSO: "DESCANSO",
             Estado.PAUSADO:  "PAUSADO",
         }
-        cor   = cores.get(estado, COR_PAUSADO)
-        label = labels.get(estado, "")
-
-        self._lbl_estado.config(text=label, fg=cor)
-        self._lbl_tempo.config(fg=cor)
-        self._frame_timer.config(highlightbackground=cor, highlightthickness=2)
+        chip = labels.get(estado, "")
 
         if estado in (Estado.FOCO, Estado.PAUSADO):
             total = int(self._cfg.get("foco_minutos") * 60)
-            pct   = (seg_rest / total * 100) if total else 0
-            self._lbl_tempo.config(text=self._fmt(seg_rest))
-            self._prog.config(value=pct)
-            self._lbl_extra.config(text="")
+            pct = (seg_rest / total) if total else 0
+            self._desenhar_anel(estado, pct, self._fmt(seg_rest), chip)
         elif estado == Estado.EXTENSAO:
-            self._lbl_tempo.config(text=self._fmt(seg_extra))
-            self._prog.config(value=100)
-            self._lbl_extra.config(text=f"⚡ +{self._fmt(seg_extra)} extra")
+            self._desenhar_anel(estado, seg_extra, self._fmt(seg_extra), chip)
         elif estado == Estado.DESCANSO:
-            total = int((self._cfg.get("descanso_base_minutos") * 60) +
-                         int(self._seg_extra_snapshot * self._cfg.get("fator_bonus")))
-            pct   = (seg_rest / total * 100) if total else 0
-            self._lbl_tempo.config(text=self._fmt(seg_rest))
-            self._prog.config(value=pct)
-            self._lbl_extra.config(text="")
+            total = int(
+                self._cfg.get("descanso_base_minutos") * 60
+                + int(self._seg_extra_snapshot * self._cfg.get("fator_bonus"))
+            )
+            pct = (seg_rest / total) if total else 0
+            self._desenhar_anel(estado, pct, self._fmt(seg_rest), chip)
 
-        tooltip = f"{label}: {self._fmt(seg_extra if estado == Estado.EXTENSAO else seg_rest)}"
+        tooltip = f"{chip}: {self._fmt(seg_extra if estado == Estado.EXTENSAO else seg_rest)}"
         self._tray.atualizar(estado, tooltip)
 
     def _aplicar_extensao(self):
-        self._lbl_estado.config(text="⚡ EXTENDENDO", fg=COR_EXTENSAO)
-        self._lbl_tempo.config(fg=COR_EXTENSAO)
+        pass  # next tick redraws ring with EXTENSAO state
 
     def _mostrar_notificacao(self, seg_extra):
         self._seg_extra_snapshot = seg_extra
@@ -727,21 +828,17 @@ class PomodoroApp(tk.Tk):
         estado = self._engine.estado
         if estado == Estado.PAUSADO:
             self._engine.retomar()
-            self._btn_pausar.config(text="  Pausar  ")
+            self._btn_pausar.config(text="Pausar")
         elif estado in (Estado.FOCO, Estado.EXTENSAO, Estado.DESCANSO):
             self._engine.pausar()
-            self._btn_pausar.config(text="  Retomar  ")
+            self._btn_pausar.config(text="Retomar")
 
     def resetar(self):
         self._engine.resetar()
         self._engine.iniciar_foco()
-        self._btn_pausar.config(text="  Pausar  ")
-        self._lbl_tempo.config(
-            text=self._fmt(int(self._cfg.get("foco_minutos") * 60)),
-            fg=COR_FOCO
-        )
-        self._lbl_estado.config(text="FOCO", fg=COR_FOCO)
-        self._lbl_extra.config(text="")
+        self._btn_pausar.config(text="Pausar")
+        total = int(self._cfg.get("foco_minutos") * 60)
+        self._desenhar_anel(Estado.FOCO, 1.0, self._fmt(total), "FOCO")
 
     def sair(self):
         self._engine.resetar()
