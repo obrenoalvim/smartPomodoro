@@ -288,7 +288,6 @@ class TimerEngine:
         # Usuário ativo → EXTENSAO silenciosa
         with self._lock:
             self._estado = Estado.EXTENSAO
-            self._estado_anterior = Estado.EXTENSAO
         if self.on_inicio_extensao:
             self.on_inicio_extensao()
 
@@ -355,11 +354,11 @@ class TrayManager:
 
     def _criar_menu(self):
         return pystray.Menu(
-            pystray.MenuItem("Mostrar / Ocultar", lambda: self._app.toggle_janela()),
-            pystray.MenuItem("Pausar / Retomar",  lambda: self._app.toggle_pausa()),
-            pystray.MenuItem("Resetar",            lambda: self._app.resetar()),
+            pystray.MenuItem("Mostrar / Ocultar", lambda: self._app.after(0, self._app.toggle_janela)),
+            pystray.MenuItem("Pausar / Retomar",  lambda: self._app.after(0, self._app.toggle_pausa)),
+            pystray.MenuItem("Resetar",            lambda: self._app.after(0, self._app.resetar)),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Sair",               lambda: self._app.sair()),
+            pystray.MenuItem("Sair",               lambda: self._app.after(0, self._app.sair)),
         )
 
     def iniciar(self):
@@ -368,7 +367,7 @@ class TrayManager:
         img = self._criar_imagem(COR_FOCO)
         menu = self._criar_menu()
         self._tray = pystray.Icon(APP_NAME, img, APP_NAME, menu)
-        self._tray.on_double_click = lambda _icon, _btn: self._app.toggle_janela()
+        self._tray.on_double_click = lambda _icon, _btn: self._app.after(0, self._app.toggle_janela)
 
         self._thread = threading.Thread(target=self._tray.run, daemon=True)
         self._thread.start()
@@ -659,7 +658,6 @@ class PomodoroApp(tk.Tk):
         self.after(0, self._aplicar_extensao)
 
     def _cb_notificar_descanso(self, seg_extra):
-        self._seg_extra_snapshot = seg_extra
         self.after(0, self._mostrar_notificacao, seg_extra)
 
     def _cb_fim_descanso(self):
@@ -712,6 +710,7 @@ class PomodoroApp(tk.Tk):
         self._lbl_tempo.config(fg=COR_EXTENSAO)
 
     def _mostrar_notificacao(self, seg_extra):
+        self._seg_extra_snapshot = seg_extra
         self._tocar_som()
         if self._notif_win and self._notif_win.winfo_exists():
             return
@@ -779,6 +778,8 @@ class PomodoroApp(tk.Tk):
             pass
 
     def _atualizar_ui_loop(self):
+        if not self.winfo_exists():
+            return
         self.after(500, self._atualizar_ui_loop)
 
 
