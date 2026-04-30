@@ -328,5 +328,64 @@ class TimerEngine:
             self.on_fim_descanso()
 
 
+# ─── TrayManager ──────────────────────────────────────────────────────────────
+class TrayManager:
+    """Gerencia o ícone na bandeja do sistema (system tray)."""
+
+    def __init__(self, app_ref):
+        self._app = app_ref  # referência à PomodoroApp
+        self._tray = None
+        self._thread = None
+
+    def _criar_imagem(self, cor, tamanho=64):
+        img  = Image.new("RGBA", (tamanho, tamanho), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+        draw.ellipse([4, 4, tamanho - 4, tamanho - 4], fill=cor)
+        return img
+
+    def _criar_menu(self):
+        return pystray.Menu(
+            pystray.MenuItem("Mostrar / Ocultar", lambda: self._app.toggle_janela()),
+            pystray.MenuItem("Pausar / Retomar",  lambda: self._app.toggle_pausa()),
+            pystray.MenuItem("Resetar",            lambda: self._app.resetar()),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Sair",               lambda: self._app.sair()),
+        )
+
+    def iniciar(self):
+        if not PYSTRAY_OK:
+            return
+        img = self._criar_imagem(COR_FOCO)
+        menu = self._criar_menu()
+        self._tray = pystray.Icon(APP_NAME, img, APP_NAME, menu)
+        self._tray.on_double_click = lambda _icon, _btn: self._app.toggle_janela()
+
+        self._thread = threading.Thread(target=self._tray.run, daemon=True)
+        self._thread.start()
+
+    def atualizar(self, estado, texto_tooltip):
+        if not self._tray:
+            return
+        cores = {
+            Estado.FOCO:     COR_FOCO,
+            Estado.EXTENSAO: COR_EXTENSAO,
+            Estado.DESCANSO: COR_DESCANSO,
+            Estado.PAUSADO:  COR_PAUSADO,
+        }
+        cor = cores.get(estado, COR_PAUSADO)
+        try:
+            self._tray.icon  = self._criar_imagem(cor)
+            self._tray.title = f"{APP_NAME} - {texto_tooltip}"
+        except Exception:
+            pass
+
+    def parar(self):
+        try:
+            if self._tray:
+                self._tray.stop()
+        except Exception:
+            pass
+
+
 if __name__ == "__main__":
     print("Módulo carregado com sucesso.")
