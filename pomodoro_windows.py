@@ -573,12 +573,7 @@ class PomodoroApp(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self._ao_fechar)
 
     def _ao_fechar(self):
-        if self._cfg.get("minimizar_para_tray") and PYSTRAY_OK:
-            self.withdraw()
-        else:
-            resp = messagebox.askyesno(APP_NAME, "Deseja fechar o Pomodoro?")
-            if resp:
-                self.sair()
+        self.sair()
 
     def toggle_janela(self):
         if self.winfo_viewable():
