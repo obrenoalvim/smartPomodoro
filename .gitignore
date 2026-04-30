@@ -28,6 +28,9 @@ Desktop.ini
 .DS_Store
 ehthumbs.db
 
+# PyInstaller
+*.spec
+
 # Project-specific
 .superpowers/
 *.log
