@@ -506,5 +506,263 @@ class NotificationWindow(tk.Toplevel):
         self.destroy()
 
 
+# ─── PomodoroApp ──────────────────────────────────────────────────────────────
+class PomodoroApp(tk.Tk):
+    """Janela principal. Orquestra todas as classes."""
+
+    def __init__(self):
+        super().__init__()
+        self._cfg     = ConfigManager()
+        self._monitor = ActivityMonitor()
+        self._engine  = TimerEngine(self._cfg, self._monitor)
+        self._tray    = TrayManager(self)
+        self._notif_win = None
+        self._seg_extra_snapshot = 0
+
+        self._configurar_janela()
+        self._construir_ui()
+        self._ligar_engine()
+        self._monitor.iniciar()
+        self._tray.iniciar()
+        self._engine.iniciar_foco()
+        self._atualizar_ui_loop()
+
+        if not PYNPUT_OK:
+            messagebox.showwarning(
+                APP_NAME,
+                "pynput não instalado. Detecção de atividade desabilitada.\n"
+                "pip install pynput"
+            )
+
+    # ── Janela ────────────────────────────────────────────────────────────────
+    def _configurar_janela(self):
+        self.title(APP_NAME)
+        self.geometry("320x420")
+        self.resizable(False, False)
+        self.configure(bg=COR_BG)
+        self.protocol("WM_DELETE_WINDOW", self._ao_fechar)
+
+    def _ao_fechar(self):
+        if self._cfg.get("minimizar_para_tray") and PYSTRAY_OK:
+            self.withdraw()
+        else:
+            resp = messagebox.askyesno(APP_NAME, "Deseja fechar o Pomodoro?")
+            if resp:
+                self.sair()
+
+    def toggle_janela(self):
+        if self.winfo_viewable():
+            self.withdraw()
+        else:
+            self.deiconify()
+            self.lift()
+
+    # ── UI ────────────────────────────────────────────────────────────────────
+    def _construir_ui(self):
+        tk.Label(self, text=f"🍅 {APP_NAME}", font=("Segoe UI", 13, "bold"),
+                 bg=COR_BG, fg=COR_FG).pack(pady=(12, 4))
+
+        self._frame_timer = tk.Frame(self, bg=COR_BG, bd=2, relief="groove")
+        self._frame_timer.pack(fill="x", padx=16, pady=8)
+
+        self._lbl_estado = tk.Label(self._frame_timer, text="FOCO",
+                                    font=("Segoe UI", 11, "bold"),
+                                    bg=COR_BG, fg=COR_FOCO)
+        self._lbl_estado.pack(pady=(10, 2))
+
+        self._lbl_tempo = tk.Label(self._frame_timer, text="25:00",
+                                   font=("Segoe UI", 36, "bold"),
+                                   bg=COR_BG, fg=COR_FOCO)
+        self._lbl_tempo.pack()
+
+        self._prog = ttk.Progressbar(self._frame_timer, length=260,
+                                     maximum=100, value=100,
+                                     mode="determinate")
+        self._prog.pack(pady=(4, 8), padx=12)
+
+        self._lbl_extra = tk.Label(self._frame_timer, text="",
+                                   font=("Segoe UI", 9),
+                                   bg=COR_BG, fg=COR_EXTENSAO)
+        self._lbl_extra.pack(pady=(0, 8))
+
+        frame_btn = tk.Frame(self, bg=COR_BG)
+        frame_btn.pack(pady=4)
+        self._btn_pausar = tk.Button(frame_btn, text="  Pausar  ",
+                                     font=("Segoe UI", 10),
+                                     bg="#333", fg=COR_FG, relief="flat",
+                                     command=self.toggle_pausa)
+        self._btn_pausar.pack(side="left", padx=6)
+        tk.Button(frame_btn, text="  Resetar  ", font=("Segoe UI", 10),
+                  bg="#333", fg=COR_FG, relief="flat",
+                  command=self.resetar).pack(side="left", padx=6)
+
+        ttk.Separator(self, orient="horizontal").pack(fill="x", padx=16, pady=8)
+
+        tk.Label(self, text="Configurações", font=("Segoe UI", 10, "bold"),
+                 bg=COR_BG, fg=COR_FG).pack(anchor="w", padx=16)
+
+        self._vars_cfg = {}
+        campos = [
+            ("foco_minutos",          "Foco (min):"),
+            ("descanso_base_minutos", "Descanso (min):"),
+            ("fator_bonus",           "Fator bônus:"),
+            ("inatividade_segundos",  "Inatividade (s):"),
+        ]
+        frame_cfg = tk.Frame(self, bg=COR_BG)
+        frame_cfg.pack(fill="x", padx=16, pady=4)
+
+        for chave, label in campos:
+            row = tk.Frame(frame_cfg, bg=COR_BG)
+            row.pack(fill="x", pady=2)
+            tk.Label(row, text=label, font=("Segoe UI", 9),
+                     bg=COR_BG, fg=COR_FG, width=18, anchor="w").pack(side="left")
+            var = tk.StringVar(value=str(self._cfg.get(chave)))
+            self._vars_cfg[chave] = var
+            entry = tk.Entry(row, textvariable=var, width=7,
+                             font=("Segoe UI", 9), bg="#333", fg=COR_FG,
+                             insertbackground=COR_FG, relief="flat")
+            entry.pack(side="left")
+            entry.bind("<FocusOut>", lambda e, k=chave: self._salvar_campo(k))
+            entry.bind("<Return>",   lambda e, k=chave: self._salvar_campo(k))
+
+    def _salvar_campo(self, chave):
+        try:
+            raw = self._vars_cfg[chave].get()
+            val = float(raw) if "." in raw else int(raw)
+            self._cfg.set(chave, val)
+        except ValueError:
+            self._vars_cfg[chave].set(str(self._cfg.get(chave)))
+
+    # ── Engine callbacks ──────────────────────────────────────────────────────
+    def _ligar_engine(self):
+        self._engine.on_tick               = self._cb_tick
+        self._engine.on_inicio_extensao    = self._cb_extensao
+        self._engine.on_notificar_descanso = self._cb_notificar_descanso
+        self._engine.on_fim_descanso       = self._cb_fim_descanso
+
+    def _cb_tick(self, estado, seg_rest, seg_extra):
+        self.after(0, self._aplicar_tick, estado, seg_rest, seg_extra)
+
+    def _cb_extensao(self):
+        self.after(0, self._aplicar_extensao)
+
+    def _cb_notificar_descanso(self, seg_extra):
+        self._seg_extra_snapshot = seg_extra
+        self.after(0, self._mostrar_notificacao, seg_extra)
+
+    def _cb_fim_descanso(self):
+        self.after(0, self._fim_descanso)
+
+    # ── Aplicadores de estado na UI (thread UI) ───────────────────────────────
+    def _aplicar_tick(self, estado, seg_rest, seg_extra):
+        cores = {
+            Estado.FOCO:     COR_FOCO,
+            Estado.EXTENSAO: COR_EXTENSAO,
+            Estado.DESCANSO: COR_DESCANSO,
+            Estado.PAUSADO:  COR_PAUSADO,
+        }
+        labels = {
+            Estado.FOCO:     "FOCO",
+            Estado.EXTENSAO: "⚡ EXTENDENDO",
+            Estado.DESCANSO: "DESCANSO",
+            Estado.PAUSADO:  "PAUSADO",
+        }
+        cor   = cores.get(estado, COR_PAUSADO)
+        label = labels.get(estado, "")
+
+        self._lbl_estado.config(text=label, fg=cor)
+        self._lbl_tempo.config(fg=cor)
+        self._frame_timer.config(highlightbackground=cor, highlightthickness=2)
+
+        if estado in (Estado.FOCO, Estado.PAUSADO):
+            total = int(self._cfg.get("foco_minutos") * 60)
+            pct   = (seg_rest / total * 100) if total else 0
+            self._lbl_tempo.config(text=self._fmt(seg_rest))
+            self._prog.config(value=pct)
+            self._lbl_extra.config(text="")
+        elif estado == Estado.EXTENSAO:
+            self._lbl_tempo.config(text=self._fmt(seg_extra))
+            self._prog.config(value=100)
+            self._lbl_extra.config(text=f"⚡ +{self._fmt(seg_extra)} extra")
+        elif estado == Estado.DESCANSO:
+            total = int((self._cfg.get("descanso_base_minutos") * 60) +
+                         int(self._seg_extra_snapshot * self._cfg.get("fator_bonus")))
+            pct   = (seg_rest / total * 100) if total else 0
+            self._lbl_tempo.config(text=self._fmt(seg_rest))
+            self._prog.config(value=pct)
+            self._lbl_extra.config(text="")
+
+        tooltip = f"{label}: {self._fmt(seg_extra if estado == Estado.EXTENSAO else seg_rest)}"
+        self._tray.atualizar(estado, tooltip)
+
+    def _aplicar_extensao(self):
+        self._lbl_estado.config(text="⚡ EXTENDENDO", fg=COR_EXTENSAO)
+        self._lbl_tempo.config(fg=COR_EXTENSAO)
+
+    def _mostrar_notificacao(self, seg_extra):
+        self._tocar_som()
+        if self._notif_win and self._notif_win.winfo_exists():
+            return
+        self._notif_win = NotificationWindow(
+            self,
+            seg_extra,
+            self._cfg,
+            on_iniciar_descanso=self._iniciar_descanso_engine,
+            on_pular=self.resetar,
+        )
+
+    def _iniciar_descanso_engine(self, seg_extra):
+        self._seg_extra_snapshot = seg_extra
+        self._engine.iniciar_descanso(seg_extra)
+
+    def _fim_descanso(self):
+        self._tocar_som()
+        self.resetar()
+
+    # ── Controles públicos ────────────────────────────────────────────────────
+    def toggle_pausa(self):
+        estado = self._engine.estado
+        if estado == Estado.PAUSADO:
+            self._engine.retomar()
+            self._btn_pausar.config(text="  Pausar  ")
+        elif estado in (Estado.FOCO, Estado.EXTENSAO, Estado.DESCANSO):
+            self._engine.pausar()
+            self._btn_pausar.config(text="  Retomar  ")
+
+    def resetar(self):
+        self._engine.resetar()
+        self._engine.iniciar_foco()
+        self._btn_pausar.config(text="  Pausar  ")
+        self._lbl_tempo.config(
+            text=self._fmt(int(self._cfg.get("foco_minutos") * 60)),
+            fg=COR_FOCO
+        )
+        self._lbl_estado.config(text="FOCO", fg=COR_FOCO)
+        self._lbl_extra.config(text="")
+
+    def sair(self):
+        self._engine.resetar()
+        self._monitor.parar()
+        self._tray.parar()
+        self.destroy()
+
+    # ── Utilitários ───────────────────────────────────────────────────────────
+    @staticmethod
+    def _fmt(s):
+        return f"{s // 60:02d}:{s % 60:02d}"
+
+    def _tocar_som(self):
+        if not self._cfg.get("som_ativado"):
+            return
+        try:
+            winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
+        except Exception:
+            pass
+
+    def _atualizar_ui_loop(self):
+        self.after(500, self._atualizar_ui_loop)
+
+
 if __name__ == "__main__":
-    print("Módulo carregado com sucesso.")
+    app = PomodoroApp()
+    app.mainloop()
