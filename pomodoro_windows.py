@@ -111,6 +111,115 @@ class ConfigManager:
         self.salvar()
 
 
+# ─── SessionStore ─────────────────────────────────────────────────────────────
+class SessionStore:
+    """Persiste sessões em SQLite para cálculo de estatísticas de foco."""
+
+    def __init__(self, db_path=DB_PATH):
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        self._db = db_path
+        self._init_db()
+
+    def _conn(self):
+        return sqlite3.connect(self._db)
+
+    def _init_db(self):
+        with self._conn() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS sessions (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    started_at      TEXT NOT NULL,
+                    configured_mins REAL NOT NULL,
+                    focus_mins      REAL NOT NULL DEFAULT 0,
+                    extension_mins  REAL NOT NULL DEFAULT 0,
+                    completed       INTEGER NOT NULL DEFAULT 0
+                )
+            """)
+
+    def record_start(self, configured_mins) -> int:
+        with self._conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO sessions (started_at, configured_mins) VALUES (?, ?)",
+                (datetime.utcnow().isoformat(), float(configured_mins)),
+            )
+            return cur.lastrowid
+
+    def record_end(self, session_id, focus_mins, extension_mins):
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE sessions SET focus_mins=?, extension_mins=?, completed=1 WHERE id=?",
+                (float(focus_mins), float(extension_mins), session_id),
+            )
+
+    def record_abandon(self, session_id):
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE sessions SET completed=0 WHERE id=?",
+                (session_id,),
+            )
+
+    def get_stats(self) -> dict:
+        empty = {
+            "avg_real_focus": 0.0,
+            "avg_extension":  0.0,
+            "total_sessions": 0,
+            "sessions_today": 0,
+            "streak_days":    0,
+            "last_7_days":    [],
+            "suggestion_mins": None,
+        }
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT configured_mins, focus_mins, extension_mins, started_at "
+                "FROM sessions WHERE completed=1 ORDER BY started_at"
+            ).fetchall()
+
+        if not rows:
+            return empty
+
+        real_focus_vals = [r[1] + r[2] for r in rows]
+        avg_real = statistics.mean(real_focus_vals)
+        avg_ext  = statistics.mean(r[2] for r in rows)
+        total    = len(rows)
+
+        today_str      = date.today().isoformat()
+        sessions_today = sum(1 for r in rows if r[3].startswith(today_str))
+
+        # consecutive-day streak ending today
+        dates  = sorted(set(r[3][:10] for r in rows))
+        streak = 0
+        check  = date.today()
+        for _ in range(len(dates) + 1):
+            if check.isoformat() in dates:
+                streak += 1
+                check -= timedelta(days=1)
+            else:
+                break
+
+        # last 7 calendar days → [("DD", count), ...]
+        last_7 = []
+        for i in range(6, -1, -1):
+            d     = (date.today() - timedelta(days=i)).isoformat()
+            count = sum(1 for r in rows if r[3].startswith(d))
+            last_7.append((d[8:], count))
+
+        # calibration suggestion: nearest 5 min, only if diverges >2 min
+        last_configured = rows[-1][0]
+        suggestion = None
+        if abs(avg_real - last_configured) > 2:
+            suggestion = max(1, round(avg_real / 5) * 5)
+
+        return {
+            "avg_real_focus": avg_real,
+            "avg_extension":  avg_ext,
+            "total_sessions": total,
+            "sessions_today": sessions_today,
+            "streak_days":    streak,
+            "last_7_days":    last_7,
+            "suggestion_mins": suggestion,
+        }
+
+
 # ─── ActivityMonitor ──────────────────────────────────────────────────────────
 class ActivityMonitor:
     """
