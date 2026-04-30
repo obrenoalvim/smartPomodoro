@@ -671,6 +671,11 @@ class PomodoroApp(tk.Tk):
         self._tray    = TrayManager(self)
         self._notif_win = None
         self._seg_extra_snapshot = 0
+        self._store = SessionStore()
+        self._session_id: int | None = None
+        self._stats_visivel = False
+        self._suggestion_visible = False
+        self._suggestion_mins: int | None = None
 
         self._configurar_janela()
         self._construir_ui()
@@ -678,6 +683,7 @@ class PomodoroApp(tk.Tk):
         self._monitor.iniciar()
         self._tray.iniciar()
         self._engine.iniciar_foco()
+        self._session_id = self._store.record_start(self._cfg.get("foco_minutos"))
         self._atualizar_ui_loop()
 
         if not PYNPUT_OK:
@@ -925,6 +931,15 @@ class PomodoroApp(tk.Tk):
         pass  # next tick redraws ring with EXTENSAO state
 
     def _mostrar_notificacao(self, seg_extra):
+        if self._session_id is not None:
+            self._store.record_end(
+                self._session_id,
+                self._cfg.get("foco_minutos"),
+                seg_extra / 60,
+            )
+            self._session_id = None
+            if self._stats_visivel:
+                self._atualizar_stats()
         self._seg_extra_snapshot = seg_extra
         self._tocar_som()
         if self._notif_win and self._notif_win.winfo_exists():
@@ -956,8 +971,12 @@ class PomodoroApp(tk.Tk):
             self._btn_pausar.config(text="Retomar")
 
     def resetar(self):
+        if self._session_id is not None:
+            self._store.record_abandon(self._session_id)
+            self._session_id = None
         self._engine.resetar()
         self._engine.iniciar_foco()
+        self._session_id = self._store.record_start(self._cfg.get("foco_minutos"))
         self._btn_pausar.config(text="Pausar")
         total = int(self._cfg.get("foco_minutos") * 60)
         self._desenhar_anel(Estado.FOCO, 1.0, self._fmt(total), "FOCO")
