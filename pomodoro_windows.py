@@ -90,5 +90,65 @@ class ConfigManager:
         self.salvar()
 
 
+# ─── ActivityMonitor ──────────────────────────────────────────────────────────
+class ActivityMonitor:
+    """
+    Monitora atividade global de mouse e teclado via pynput.
+    Roda em threads separadas em segundo plano.
+    """
+
+    def __init__(self):
+        self._ultimo = time.time()
+        self._lock = threading.Lock()
+        self._mouse_listener = None
+        self._kb_listener = None
+        self._ativo = False
+
+    def iniciar(self):
+        if not PYNPUT_OK:
+            return False
+        try:
+            def _atividade(*args, **kwargs):
+                with self._lock:
+                    self._ultimo = time.time()
+
+            self._mouse_listener = mouse.Listener(
+                on_move=_atividade,
+                on_click=_atividade,
+                on_scroll=_atividade,
+                daemon=True,
+            )
+            self._kb_listener = keyboard.Listener(
+                on_press=_atividade,
+                daemon=True,
+            )
+            self._mouse_listener.start()
+            self._kb_listener.start()
+            self._ativo = True
+            return True
+        except Exception as e:
+            print(f"[ActivityMonitor] Falha ao iniciar: {e}")
+            return False
+
+    def parar(self):
+        try:
+            if self._mouse_listener:
+                self._mouse_listener.stop()
+            if self._kb_listener:
+                self._kb_listener.stop()
+        except Exception:
+            pass
+        self._ativo = False
+
+    @property
+    def segundos_inativo(self) -> float:
+        with self._lock:
+            return time.time() - self._ultimo
+
+    @property
+    def esta_ativo(self) -> bool:
+        return self._ativo
+
+
 if __name__ == "__main__":
     print("Módulo carregado com sucesso.")
