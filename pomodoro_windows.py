@@ -14,6 +14,9 @@ import enum
 import threading
 import tkinter as tk
 from tkinter import messagebox
+import sqlite3
+import statistics
+from datetime import date, datetime, timedelta
 
 def _resource(rel):
     """Resolve caminho de recurso — dev ou bundle PyInstaller."""
@@ -44,6 +47,11 @@ CONFIG_PATH = os.path.join(
     os.environ.get("APPDATA", os.path.expanduser("~")),
     "PomodoroInteligente",
     "config.json"
+)
+DB_PATH = os.path.join(
+    os.environ.get("APPDATA", os.path.expanduser("~")),
+    "PomodoroInteligente",
+    "sessions.db"
 )
 CONFIG_DEFAULT = {
     "foco_minutos": 25,
