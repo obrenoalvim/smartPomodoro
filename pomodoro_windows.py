@@ -387,5 +387,124 @@ class TrayManager:
             pass
 
 
+# ─── NotificationWindow ───────────────────────────────────────────────────────
+class NotificationWindow(tk.Toplevel):
+    """
+    Janela de descanso. Aparece na frente de tudo, centralizada.
+    Exibe tempo de descanso calculado e timer countdown.
+    """
+
+    def __init__(self, parent, segundos_extra, config,
+                 on_iniciar_descanso, on_pular):
+        super().__init__(parent)
+        self._cfg = config
+        self._on_iniciar_descanso = on_iniciar_descanso
+        self._on_pular = on_pular
+
+        bonus_seg   = int(segundos_extra * config.get("fator_bonus"))
+        base_seg    = int(config.get("descanso_base_minutos") * 60)
+        self._total = base_seg + bonus_seg
+        self._restante = self._total
+        self._rodando  = False
+        self._seg_extra = segundos_extra
+
+        self._construir_ui(segundos_extra, bonus_seg, base_seg)
+        self._centralizar()
+        self.attributes("-topmost", True)
+        self.resizable(False, False)
+        self.protocol("WM_DELETE_WINDOW", self._pular)
+
+    def _fmt(self, s):
+        return f"{s // 60:02d}:{s % 60:02d}"
+
+    def _construir_ui(self, seg_extra, bonus_seg, base_seg):
+        self.title("Hora de descansar!")
+        self.configure(bg=COR_BG)
+
+        pad = {"padx": 20, "pady": 8}
+
+        tk.Label(self, text="🎉 Ótimo trabalho!", font=("Segoe UI", 16, "bold"),
+                 bg=COR_BG, fg=COR_FG).pack(**pad)
+
+        foco_min  = seg_extra // 60
+        foco_seg  = seg_extra % 60
+        bonus_min = bonus_seg // 60
+        bonus_sec = bonus_seg % 60
+        base_min  = base_seg  // 60
+
+        info = (
+            f"Você trabalhou:\n"
+            f"  {self._cfg.get('foco_minutos')} min + "
+            f"{foco_min}m{foco_seg:02d}s extras"
+        )
+        tk.Label(self, text=info, font=("Segoe UI", 11),
+                 bg=COR_BG, fg=COR_FG, justify="left").pack(**pad)
+
+        tk.Label(self, text="Tempo de descanso:", font=("Segoe UI", 11),
+                 bg=COR_BG, fg=COR_FG).pack(pady=(12, 2))
+
+        self._prog = ttk.Progressbar(self, length=240, maximum=self._total,
+                                     value=self._total, mode="determinate")
+        self._prog.pack(padx=20, pady=4)
+
+        self._lbl_timer = tk.Label(self, text=self._fmt(self._total),
+                                   font=("Segoe UI", 28, "bold"),
+                                   bg=COR_BG, fg=COR_DESCANSO)
+        self._lbl_timer.pack(**pad)
+
+        detalhe = (
+            f"({base_min} min base + "
+            f"{bonus_min}m{bonus_sec:02d}s bônus)"
+        )
+        tk.Label(self, text=detalhe, font=("Segoe UI", 9),
+                 bg=COR_BG, fg="#888").pack(pady=(0, 12))
+
+        tk.Button(self, text="  Começar descanso  ", font=("Segoe UI", 11),
+                  bg=COR_DESCANSO, fg="white", relief="flat",
+                  command=self._iniciar).pack(padx=20, pady=4, fill="x")
+
+        tk.Button(self, text="Pular", font=("Segoe UI", 10),
+                  bg="#333", fg=COR_FG, relief="flat",
+                  command=self._pular).pack(padx=20, pady=(0, 16), fill="x")
+
+    def _centralizar(self):
+        self.update_idletasks()
+        w, h = self.winfo_width(), self.winfo_height()
+        sw = self.winfo_screenwidth()
+        sh = self.winfo_screenheight()
+        x = (sw - w) // 2
+        y = (sh - h) // 2
+        self.geometry(f"+{x}+{y}")
+
+    def _iniciar(self):
+        if not self._rodando:
+            self._rodando = True
+            self._tick()
+            self._on_iniciar_descanso(self._seg_extra)
+
+    def _tick(self):
+        if not self._rodando or not self.winfo_exists():
+            return
+        if self._restante > 0:
+            self._restante -= 1
+            self._lbl_timer.config(text=self._fmt(self._restante))
+            self._prog.config(value=self._restante)
+            self.after(1000, self._tick)
+        else:
+            self._concluir()
+
+    def _concluir(self):
+        self._rodando = False
+        self._lbl_timer.config(text="00:00", fg=COR_FOCO)
+        messagebox.showinfo("Pomodoro", "Pronto para focar novamente! 🍅",
+                            parent=self)
+        self.destroy()
+
+    def _pular(self):
+        self._rodando = False
+        self._on_pular()
+        self.destroy()
+
+
 if __name__ == "__main__":
     print("Módulo carregado com sucesso.")
