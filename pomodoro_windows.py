@@ -763,6 +763,21 @@ class PomodoroApp(tk.Tk):
         self.after(500, self._atualizar_ui_loop)
 
 
+# ─── TESTE RÁPIDO ─────────────────────────────────────────────────────────────
+# Para validar o fluxo completo sem esperar 25 minutos:
+#
+#   1. Abra o app normalmente
+#   2. No campo "Foco (min):" coloque 0.1  (= 6 segundos)
+#   3. No campo "Inatividade (s):" coloque 3
+#   4. Clique fora do campo para salvar
+#   5. Clique "Resetar"
+#   6. Aguarde 6s → timer zera
+#   7. Mexa o mouse → modo EXTENSAO (ícone laranja)
+#   8. Pare de mexer por 3s → janela de descanso aparece
+#   9. Clique "Começar descanso" → timer de descanso inicia
+#  10. Aguarde o descanso terminar → volta ao foco
+
+
 if __name__ == "__main__":
     app = PomodoroApp()
     app.mainloop()
