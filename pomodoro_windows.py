@@ -982,6 +982,9 @@ class PomodoroApp(tk.Tk):
         self._desenhar_anel(Estado.FOCO, 1.0, self._fmt(total), "FOCO")
 
     def sair(self):
+        if self._session_id is not None:
+            self._store.record_abandon(self._session_id)
+            self._session_id = None
         self._engine.resetar()
         self._monitor.parar()
         self._tray.parar()
