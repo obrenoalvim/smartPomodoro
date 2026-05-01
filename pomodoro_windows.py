@@ -1020,7 +1020,11 @@ class PomodoroApp(tk.Tk):
         if self._suggestion_mins is not None:
             self._vars_cfg["foco_minutos"].set(str(self._suggestion_mins))
             self._salvar_campo("foco_minutos")
-            self._atualizar_stats()
+            self._suggestion_mins = None
+            if self._suggestion_visible:
+                self._frame_suggestion.pack_forget()
+                self._suggestion_visible = False
+                self._recalcular_altura()
 
     def _salvar_campo(self, chave):
         try:
