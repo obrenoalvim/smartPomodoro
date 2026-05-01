@@ -936,6 +936,9 @@ class PomodoroApp(tk.Tk):
     def _toggle_stats(self):
         pass  # replaced in Task 5
 
+    def _aplicar_sugestao(self):
+        pass  # implemented in Task 5
+
     def _salvar_campo(self, chave):
         try:
             raw = self._vars_cfg[chave].get()
