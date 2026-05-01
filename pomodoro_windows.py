@@ -873,13 +873,26 @@ class PomodoroApp(tk.Tk):
     def _toggle_config(self):
         if self._config_visivel:
             self._frame_cfg.pack_forget()
-            self.geometry("300x340")
             self._btn_gear.config(fg=COR_FG2)
         else:
-            self._frame_cfg.pack(fill="x", padx=14, pady=(0, 14))
-            self.geometry("300x460")
+            self._frame_cfg.pack(fill="x", padx=14, pady=(0, 4))
+            # Re-pack stats after config to keep config-above-stats order
+            if self._stats_visivel:
+                self._frame_stats.pack_forget()
+                self._frame_stats.pack(fill="x", padx=14, pady=(0, 14))
             self._btn_gear.config(fg=COR_FOCO)
         self._config_visivel = not self._config_visivel
+        self._recalcular_altura()
+
+    def _recalcular_altura(self):
+        h = 340
+        if self._config_visivel:
+            h += 120
+        if self._stats_visivel:
+            h += 200
+            if self._suggestion_visible:
+                h += 80
+        self.geometry(f"300x{h}")
 
     def _construir_stats_panel(self):
         self._frame_stats = tk.Frame(
@@ -934,10 +947,80 @@ class PomodoroApp(tk.Tk):
         tk.Frame(self._frame_stats, bg=COR_SURFACE, height=6).pack()
 
     def _toggle_stats(self):
-        pass  # replaced in Task 5
+        if self._stats_visivel:
+            self._frame_stats.pack_forget()
+            self._btn_stats.config(fg=COR_FG2)
+        else:
+            self._frame_stats.pack(fill="x", padx=14, pady=(0, 14))
+            self._btn_stats.config(fg=COR_FOCO)
+            self._atualizar_stats()
+        self._stats_visivel = not self._stats_visivel
+        self._recalcular_altura()
+
+    def _desenhar_barras(self, last_7_days):
+        c = self._canvas_chart
+        c.delete("all")
+        if not last_7_days:
+            return
+        max_count = max(count for _, count in last_7_days) or 1
+        bar_w   = 28
+        gap     = (276 - 7 * bar_w) // 8
+        chart_h = 36
+
+        for i, (day_label, count) in enumerate(last_7_days):
+            x     = gap + i * (bar_w + gap)
+            bar_h = max(int((count / max_count) * chart_h), 2) if count > 0 else 2
+            y_top = chart_h + 2 - bar_h
+            y_bot = chart_h + 2
+            bar_color = "#4DA3FF" if i == 6 else COR_FOCO
+            c.create_rectangle(x, y_top, x + bar_w, y_bot, fill=bar_color, outline="")
+            c.create_text(x + bar_w // 2, 47,
+                          text=day_label, font=("Segoe UI", 6), fill=COR_FG2)
+
+    def _atualizar_stats(self):
+        stats = self._store.get_stats()
+
+        if stats["total_sessions"] > 0:
+            self._lbl_avg_focus.config(text=f"{stats['avg_real_focus']:.0f} min")
+            self._lbl_avg_ext.config(text=f"+{stats['avg_extension']:.0f} min")
+        else:
+            self._lbl_avg_focus.config(text="—")
+            self._lbl_avg_ext.config(text="—")
+
+        self._lbl_sessions.config(
+            text=f"{stats['sessions_today']} / {stats['total_sessions']}"
+        )
+        streak = stats["streak_days"]
+        self._lbl_streak.config(
+            text=f"{streak} dias {'🔥' if streak >= 3 else ''}"
+        )
+
+        self._desenhar_barras(stats["last_7_days"])
+
+        sug = stats["suggestion_mins"]
+        if sug is not None:
+            avg = stats["avg_real_focus"]
+            self._lbl_suggestion.config(
+                text=f"💡 Seu foco real é ~{avg:.0f}min. Considere ajustar para {sug}min."
+            )
+            self._btn_ajustar.config(text=f"Ajustar para {sug}min")
+            self._suggestion_mins = sug
+            if not self._suggestion_visible:
+                self._frame_suggestion.pack(fill="x")
+                self._suggestion_visible = True
+                self._recalcular_altura()
+        else:
+            self._suggestion_mins = None
+            if self._suggestion_visible:
+                self._frame_suggestion.pack_forget()
+                self._suggestion_visible = False
+                self._recalcular_altura()
 
     def _aplicar_sugestao(self):
-        pass  # implemented in Task 5
+        if self._suggestion_mins is not None:
+            self._vars_cfg["foco_minutos"].set(str(self._suggestion_mins))
+            self._salvar_campo("foco_minutos")
+            self._atualizar_stats()
 
     def _salvar_campo(self, chave):
         try:
