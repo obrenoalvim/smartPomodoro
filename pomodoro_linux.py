@@ -21,6 +21,9 @@ import subprocess
 import threading
 import tkinter as tk
 from tkinter import messagebox
+import sqlite3
+import statistics
+from datetime import date, datetime, timedelta
 
 def _resource(rel):
     """Resolve caminho de recurso — dev ou bundle PyInstaller."""
@@ -43,6 +46,11 @@ except ImportError:
 # ─── Constantes ───────────────────────────────────────────────────────────────
 APP_NAME = "Pomodoro Inteligente"
 CONFIG_PATH = os.path.expanduser("~/.config/pomodoro_inteligente/config.json")
+DB_PATH = os.path.join(
+    os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")),
+    "PomodoroInteligente",
+    "sessions.db"
+)
 CONFIG_DEFAULT = {
     "foco_minutos": 25,
     "descanso_base_minutos": 5,
@@ -99,6 +107,115 @@ class ConfigManager:
     def set(self, chave, valor):
         self._cfg[chave] = valor
         self.salvar()
+
+
+# ─── SessionStore ─────────────────────────────────────────────────────────────
+class SessionStore:
+    """Persiste sessões em SQLite para cálculo de estatísticas de foco."""
+
+    def __init__(self, db_path=DB_PATH):
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        self._db = db_path
+        self._init_db()
+
+    def _conn(self):
+        return sqlite3.connect(self._db)
+
+    def _init_db(self):
+        with self._conn() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS sessions (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    started_at      TEXT NOT NULL,
+                    configured_mins REAL NOT NULL,
+                    focus_mins      REAL NOT NULL DEFAULT 0,
+                    extension_mins  REAL NOT NULL DEFAULT 0,
+                    completed       INTEGER NOT NULL DEFAULT 0
+                )
+            """)
+
+    def record_start(self, configured_mins) -> int:
+        with self._conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO sessions (started_at, configured_mins) VALUES (?, ?)",
+                (datetime.utcnow().isoformat(), float(configured_mins)),
+            )
+            return cur.lastrowid
+
+    def record_end(self, session_id, focus_mins, extension_mins):
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE sessions SET focus_mins=?, extension_mins=?, completed=1 WHERE id=?",
+                (float(focus_mins), float(extension_mins), session_id),
+            )
+
+    def record_abandon(self, session_id):
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE sessions SET completed=0 WHERE id=?",
+                (session_id,),
+            )
+
+    def get_stats(self) -> dict:
+        empty = {
+            "avg_real_focus": 0.0,
+            "avg_extension":  0.0,
+            "total_sessions": 0,
+            "sessions_today": 0,
+            "streak_days":    0,
+            "last_7_days":    [],
+            "suggestion_mins": None,
+        }
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT configured_mins, focus_mins, extension_mins, started_at "
+                "FROM sessions WHERE completed=1 ORDER BY started_at"
+            ).fetchall()
+
+        if not rows:
+            return empty
+
+        real_focus_vals = [r[1] + r[2] for r in rows]
+        avg_real = statistics.mean(real_focus_vals)
+        avg_ext  = statistics.mean(r[2] for r in rows)
+        total    = len(rows)
+
+        today_str      = date.today().isoformat()
+        sessions_today = sum(1 for r in rows if r[3].startswith(today_str))
+
+        # consecutive-day streak ending today
+        dates  = sorted(set(r[3][:10] for r in rows))
+        streak = 0
+        check  = date.today()
+        for _ in range(len(dates) + 1):
+            if check.isoformat() in dates:
+                streak += 1
+                check -= timedelta(days=1)
+            else:
+                break
+
+        # last 7 calendar days → [("DD", count), ...]
+        last_7 = []
+        for i in range(6, -1, -1):
+            d     = (date.today() - timedelta(days=i)).isoformat()
+            count = sum(1 for r in rows if r[3].startswith(d))
+            last_7.append((d[8:], count))
+
+        # calibration suggestion: nearest 5 min, only if diverges >2 min
+        last_configured = rows[-1][0]
+        suggestion = None
+        if abs(avg_real - last_configured) > 2:
+            suggestion = max(1, round(avg_real / 5) * 5)
+
+        return {
+            "avg_real_focus": avg_real,
+            "avg_extension":  avg_ext,
+            "total_sessions": total,
+            "sessions_today": sessions_today,
+            "streak_days":    streak,
+            "last_7_days":    last_7,
+            "suggestion_mins": suggestion,
+        }
 
 
 # ─── ActivityMonitor ──────────────────────────────────────────────────────────
@@ -560,6 +677,11 @@ class PomodoroApp(tk.Tk):
         self._tray    = TrayManager(self)
         self._notif_win = None
         self._seg_extra_snapshot = 0
+        self._store = SessionStore()
+        self._session_id: int | None = None
+        self._stats_visivel = False
+        self._suggestion_visible = False
+        self._suggestion_mins: int | None = None
 
         self._configurar_janela()
         self._construir_ui()
@@ -567,6 +689,7 @@ class PomodoroApp(tk.Tk):
         self._monitor.iniciar()
         self._tray.iniciar()
         self._engine.iniciar_foco()
+        self._session_id = self._store.record_start(self._cfg.get("foco_minutos"))
         self._atualizar_ui_loop()
 
         if not PYNPUT_OK:
@@ -619,6 +742,13 @@ class PomodoroApp(tk.Tk):
             command=self._toggle_config, cursor="hand2",
         )
         self._btn_gear.pack(side="right", padx=8)
+        self._btn_stats = tk.Button(
+            bar, text="📊", font=("Helvetica Neue", 11),
+            bg=COR_SURFACE, fg=COR_FG2, relief="flat", bd=0,
+            activebackground=COR_SURFACE, activeforeground=COR_FG,
+            command=self._toggle_stats, cursor="hand2",
+        )
+        self._btn_stats.pack(side="right", padx=(0, 4))
         tk.Frame(self, bg=COR_BORDER, height=1).pack(fill="x")
 
         # Ring canvas
@@ -683,6 +813,7 @@ class PomodoroApp(tk.Tk):
         # Initial ring draw
         total = int(self._cfg.get("foco_minutos") * 60)
         self._desenhar_anel(Estado.FOCO, 1.0, self._fmt(total), "FOCO")
+        self._construir_stats_panel()
 
     def _desenhar_anel(self, estado, pct, texto, chip_label):
         cores = {
@@ -750,16 +881,159 @@ class PomodoroApp(tk.Tk):
                 fill=COR_EXTENSAO,
             )
 
+    def _recalcular_altura(self):
+        h = 340
+        if self._config_visivel:
+            h += 120
+        if self._stats_visivel:
+            h += 200
+            if self._suggestion_visible:
+                h += 80
+        self.geometry(f"300x{h}")
+
     def _toggle_config(self):
         if self._config_visivel:
             self._frame_cfg.pack_forget()
-            self.geometry("300x340")
             self._btn_gear.config(fg=COR_FG2)
         else:
-            self._frame_cfg.pack(fill="x", padx=14, pady=(0, 14))
-            self.geometry("300x460")
+            self._frame_cfg.pack(fill="x", padx=14, pady=(0, 4))
+            if self._stats_visivel:
+                self._frame_stats.pack_forget()
+                self._frame_stats.pack(fill="x", padx=14, pady=(0, 14))
             self._btn_gear.config(fg=COR_FOCO)
         self._config_visivel = not self._config_visivel
+        self._recalcular_altura()
+
+    def _construir_stats_panel(self):
+        self._frame_stats = tk.Frame(
+            self, bg=COR_SURFACE,
+            highlightbackground=COR_BORDER, highlightthickness=1,
+        )
+
+        tk.Label(self._frame_stats, text="📊 SUAS ESTATÍSTICAS",
+                 font=("Helvetica Neue", 7, "bold"),
+                 bg=COR_SURFACE, fg=COR_FG2).pack(anchor="w", padx=10, pady=(8, 4))
+
+        def _row(label, color=COR_FG):
+            row = tk.Frame(self._frame_stats, bg=COR_SURFACE)
+            row.pack(fill="x", padx=10, pady=1)
+            tk.Label(row, text=label, font=("Helvetica Neue", 9),
+                     bg=COR_SURFACE, fg=COR_FG2).pack(side="left")
+            lbl = tk.Label(row, text="—", font=("Helvetica Neue", 9, "bold"),
+                           bg=COR_SURFACE, fg=color)
+            lbl.pack(side="right")
+            return lbl
+
+        self._lbl_avg_focus = _row("Foco real médio", COR_FOCO)
+        self._lbl_avg_ext   = _row("Extensão média",   COR_EXTENSAO)
+        self._lbl_sessions  = _row("Sessões hoje / total")
+        self._lbl_streak    = _row("Streak")
+
+        self._canvas_chart = tk.Canvas(
+            self._frame_stats, width=276, height=50,
+            bg=COR_SURFACE, highlightthickness=0,
+        )
+        self._canvas_chart.pack(padx=10, pady=(6, 2))
+
+        tk.Frame(self._frame_stats, bg=COR_BORDER, height=1).pack(fill="x", padx=10)
+
+        self._frame_suggestion = tk.Frame(self._frame_stats, bg=COR_SURFACE)
+        self._lbl_suggestion = tk.Label(
+            self._frame_suggestion,
+            text="", font=("Helvetica Neue", 8), wraplength=240, justify="left",
+            bg="#1A2A3A", fg=COR_FG, padx=7, pady=5,
+        )
+        self._lbl_suggestion.pack(fill="x", padx=10, pady=(6, 4))
+        self._btn_ajustar = tk.Button(
+            self._frame_suggestion,
+            text="", font=("Helvetica Neue", 9, "bold"),
+            bg=COR_FOCO, fg="white", relief="flat", bd=0,
+            activebackground="#0070E0", activeforeground="white",
+            command=self._aplicar_sugestao,
+        )
+        self._btn_ajustar.pack(fill="x", padx=10, ipady=6, pady=(0, 6))
+
+        tk.Frame(self._frame_stats, bg=COR_SURFACE, height=6).pack()
+
+    def _toggle_stats(self):
+        if self._stats_visivel:
+            self._frame_stats.pack_forget()
+            self._btn_stats.config(fg=COR_FG2)
+        else:
+            self._frame_stats.pack(fill="x", padx=14, pady=(0, 14))
+            self._btn_stats.config(fg=COR_FOCO)
+            self._atualizar_stats()
+        self._stats_visivel = not self._stats_visivel
+        self._recalcular_altura()
+
+    def _desenhar_barras(self, last_7_days):
+        c = self._canvas_chart
+        c.delete("all")
+        if not last_7_days:
+            return
+        max_count = max(count for _, count in last_7_days) or 1
+        bar_w   = 28
+        gap     = (276 - 7 * bar_w) // 8
+        chart_h = 36
+
+        for i, (day_label, count) in enumerate(last_7_days):
+            x     = gap + i * (bar_w + gap)
+            bar_h = max(int((count / max_count) * chart_h), 2) if count > 0 else 2
+            y_top = chart_h + 2 - bar_h
+            y_bot = chart_h + 2
+            bar_color = "#4DA3FF" if i == 6 else COR_FOCO
+            c.create_rectangle(x, y_top, x + bar_w, y_bot, fill=bar_color, outline="")
+            c.create_text(x + bar_w // 2, 47,
+                          text=day_label, font=("Helvetica Neue", 6), fill=COR_FG2)
+
+    def _atualizar_stats(self):
+        stats = self._store.get_stats()
+
+        if stats["total_sessions"] > 0:
+            self._lbl_avg_focus.config(text=f"{stats['avg_real_focus']:.0f} min")
+            self._lbl_avg_ext.config(text=f"+{stats['avg_extension']:.0f} min")
+        else:
+            self._lbl_avg_focus.config(text="—")
+            self._lbl_avg_ext.config(text="—")
+
+        self._lbl_sessions.config(
+            text=f"{stats['sessions_today']} / {stats['total_sessions']}"
+        )
+        streak = stats["streak_days"]
+        self._lbl_streak.config(
+            text=f"{streak} dias {'🔥' if streak >= 3 else ''}"
+        )
+
+        self._desenhar_barras(stats["last_7_days"])
+
+        sug = stats["suggestion_mins"]
+        if sug is not None:
+            avg = stats["avg_real_focus"]
+            self._lbl_suggestion.config(
+                text=f"💡 Seu foco real é ~{avg:.0f}min. Considere ajustar para {sug}min."
+            )
+            self._btn_ajustar.config(text=f"Ajustar para {sug}min")
+            self._suggestion_mins = sug
+            if not self._suggestion_visible:
+                self._frame_suggestion.pack(fill="x")
+                self._suggestion_visible = True
+                self._recalcular_altura()
+        else:
+            self._suggestion_mins = None
+            if self._suggestion_visible:
+                self._frame_suggestion.pack_forget()
+                self._suggestion_visible = False
+                self._recalcular_altura()
+
+    def _aplicar_sugestao(self):
+        if self._suggestion_mins is not None:
+            self._vars_cfg["foco_minutos"].set(str(self._suggestion_mins))
+            self._salvar_campo("foco_minutos")
+            self._suggestion_mins = None
+            if self._suggestion_visible:
+                self._frame_suggestion.pack_forget()
+                self._suggestion_visible = False
+                self._recalcular_altura()
 
     def _salvar_campo(self, chave):
         try:
@@ -819,6 +1093,15 @@ class PomodoroApp(tk.Tk):
         pass  # next tick redraws ring with EXTENSAO state
 
     def _mostrar_notificacao(self, seg_extra):
+        if self._session_id is not None:
+            self._store.record_end(
+                self._session_id,
+                self._cfg.get("foco_minutos"),
+                seg_extra / 60,
+            )
+            self._session_id = None
+            if self._stats_visivel:
+                self._atualizar_stats()
         self._seg_extra_snapshot = seg_extra
         self._tocar_som()
         if self._notif_win and self._notif_win.winfo_exists():
@@ -850,13 +1133,20 @@ class PomodoroApp(tk.Tk):
             self._btn_pausar.config(text="Retomar")
 
     def resetar(self):
+        if self._session_id is not None:
+            self._store.record_abandon(self._session_id)
+            self._session_id = None
         self._engine.resetar()
         self._engine.iniciar_foco()
+        self._session_id = self._store.record_start(self._cfg.get("foco_minutos"))
         self._btn_pausar.config(text="Pausar")
         total = int(self._cfg.get("foco_minutos") * 60)
         self._desenhar_anel(Estado.FOCO, 1.0, self._fmt(total), "FOCO")
 
     def sair(self):
+        if self._session_id is not None:
+            self._store.record_abandon(self._session_id)
+            self._session_id = None
         self._engine.resetar()
         self._monitor.parar()
         self._tray.parar()
