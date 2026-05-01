@@ -731,6 +731,13 @@ class PomodoroApp(tk.Tk):
             command=self._toggle_config, cursor="hand2",
         )
         self._btn_gear.pack(side="right", padx=8)
+        self._btn_stats = tk.Button(
+            bar, text="📊", font=("Segoe UI", 11),
+            bg=COR_SURFACE, fg=COR_FG2, relief="flat", bd=0,
+            activebackground=COR_SURFACE, activeforeground=COR_FG,
+            command=self._toggle_stats, cursor="hand2",
+        )
+        self._btn_stats.pack(side="right", padx=(0, 4))
         tk.Frame(self, bg=COR_BORDER, height=1).pack(fill="x")
 
         # Ring canvas
@@ -795,6 +802,7 @@ class PomodoroApp(tk.Tk):
         # Initial ring draw
         total = int(self._cfg.get("foco_minutos") * 60)
         self._desenhar_anel(Estado.FOCO, 1.0, self._fmt(total), "FOCO")
+        self._construir_stats_panel()
 
     def _desenhar_anel(self, estado, pct, texto, chip_label):
         cores = {
@@ -872,6 +880,61 @@ class PomodoroApp(tk.Tk):
             self.geometry("300x460")
             self._btn_gear.config(fg=COR_FOCO)
         self._config_visivel = not self._config_visivel
+
+    def _construir_stats_panel(self):
+        self._frame_stats = tk.Frame(
+            self, bg=COR_SURFACE,
+            highlightbackground=COR_BORDER, highlightthickness=1,
+        )
+
+        tk.Label(self._frame_stats, text="📊 SUAS ESTATÍSTICAS",
+                 font=("Segoe UI", 7, "bold"),
+                 bg=COR_SURFACE, fg=COR_FG2).pack(anchor="w", padx=10, pady=(8, 4))
+
+        def _row(label, color=COR_FG):
+            row = tk.Frame(self._frame_stats, bg=COR_SURFACE)
+            row.pack(fill="x", padx=10, pady=1)
+            tk.Label(row, text=label, font=("Segoe UI", 9),
+                     bg=COR_SURFACE, fg=COR_FG2).pack(side="left")
+            lbl = tk.Label(row, text="—", font=("Segoe UI", 9, "bold"),
+                           bg=COR_SURFACE, fg=color)
+            lbl.pack(side="right")
+            return lbl
+
+        self._lbl_avg_focus = _row("Foco real médio", COR_FOCO)
+        self._lbl_avg_ext   = _row("Extensão média",   COR_EXTENSAO)
+        self._lbl_sessions  = _row("Sessões hoje / total")
+        self._lbl_streak    = _row("Streak")
+
+        self._canvas_chart = tk.Canvas(
+            self._frame_stats, width=276, height=50,
+            bg=COR_SURFACE, highlightthickness=0,
+        )
+        self._canvas_chart.pack(padx=10, pady=(6, 2))
+
+        tk.Frame(self._frame_stats, bg=COR_BORDER, height=1).pack(fill="x", padx=10)
+
+        # Suggestion area — packed only when suggestion_mins is not None
+        self._frame_suggestion = tk.Frame(self._frame_stats, bg=COR_SURFACE)
+        self._lbl_suggestion = tk.Label(
+            self._frame_suggestion,
+            text="", font=("Segoe UI", 8), wraplength=240, justify="left",
+            bg="#1A2A3A", fg=COR_FG, padx=7, pady=5,
+        )
+        self._lbl_suggestion.pack(fill="x", padx=10, pady=(6, 4))
+        self._btn_ajustar = tk.Button(
+            self._frame_suggestion,
+            text="", font=("Segoe UI", 9, "bold"),
+            bg=COR_FOCO, fg="white", relief="flat", bd=0,
+            activebackground="#0070E0", activeforeground="white",
+            command=self._aplicar_sugestao,
+        )
+        self._btn_ajustar.pack(fill="x", padx=10, ipady=6, pady=(0, 6))
+
+        tk.Frame(self._frame_stats, bg=COR_SURFACE, height=6).pack()
+
+    def _toggle_stats(self):
+        pass  # replaced in Task 5
 
     def _salvar_campo(self, chave):
         try:
