@@ -1,6 +1,6 @@
 # 🍅 Pomodoro Inteligente
 
-[![Python](https://img.shields.io/badge/Python-3.8%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
+[![CI](https://github.com/obrenoalvim/smartPomodoro/actions/workflows/ci.yml/badge.svg)](https://github.com/obrenoalvim/smartPomodoro/actions/workflows/ci.yml) [![Python](https://img.shields.io/badge/Python-3.8%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-lightgrey)](.)
 
