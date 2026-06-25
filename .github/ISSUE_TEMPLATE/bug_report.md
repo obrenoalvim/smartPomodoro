@@ -1,31 +1,23 @@
 ---
-name: Bug Report
-about: Reportar um problema / Report a bug
-title: '[BUG] '
+name: Bug report
+about: Report a problem
 labels: bug
-assignees: ''
 ---
 
-**Sistema / System**
-- OS: [ex: Windows 11 / Ubuntu 22.04]
-- Python: [ex: 3.11.2]
-- Versão do app / App version: [ex: main branch / commit hash]
+**Describe the bug**
+A clear description of what the bug is.
 
-**Passos para reproduzir / Steps to reproduce**
-1.
-2.
-3.
+**Steps to reproduce**
+1. Go to '...'
+2. Click on '...'
+3. See error
 
-**Comportamento esperado / Expected behavior**
+**Expected behavior**
+What you expected to happen.
 
+**Screenshots**
+If applicable, add screenshots.
 
-**Comportamento atual / Actual behavior**
-
-
-**Logs / Error messages**
-```
-cole aqui / paste here
-```
-
-**Contexto adicional / Additional context**
-
+**Environment**
+- OS: [e.g. Windows 11]
+- Browser: [e.g. Chrome 120]

@@ -1,19 +1,14 @@
 ---
-name: Feature Request
-about: Sugerir uma nova funcionalidade / Suggest a new feature
-title: '[FEAT] '
+name: Feature request
+about: Suggest an idea or improvement
 labels: enhancement
-assignees: ''
 ---
 
-**Problema que esta feature resolve / Problem this feature solves**
+**Is your feature request related to a problem?**
+A clear description of what the problem is.
 
+**Describe the solution you'd like**
+A clear description of what you want to happen.
 
-**Solução proposta / Proposed solution**
-
-
-**Alternativas consideradas / Alternatives considered**
-
-
-**Contexto adicional / Additional context**
-
+**Additional context**
+Any other context or screenshots about the feature request.
