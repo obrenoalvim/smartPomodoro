@@ -17,6 +17,7 @@ from tkinter import messagebox
 import sqlite3
 import statistics
 from datetime import date, datetime, timedelta
+from typing import Optional
 
 def _resource(rel):
     """Resolve caminho de recurso — dev ou bundle PyInstaller."""
@@ -140,7 +141,7 @@ class SessionStore:
         with self._conn() as conn:
             cur = conn.execute(
                 "INSERT INTO sessions (started_at, configured_mins) VALUES (?, ?)",
-                (datetime.utcnow().isoformat(), float(configured_mins)),
+                (datetime.now().isoformat(), float(configured_mins)),
             )
             return cur.lastrowid
 
@@ -275,10 +276,6 @@ class ActivityMonitor:
         with self._lock:
             return time.time() - self._ultimo
 
-    @property
-    def esta_ativo(self) -> bool:
-        return self._ativo
-
 
 # ─── TimerEngine ──────────────────────────────────────────────────────────────
 class TimerEngine:
@@ -312,16 +309,6 @@ class TimerEngine:
     def estado(self):
         with self._lock:
             return self._estado
-
-    @property
-    def segundos_restantes(self):
-        with self._lock:
-            return self._segundos_restantes
-
-    @property
-    def segundos_extra(self):
-        with self._lock:
-            return self._segundos_extra
 
     # ── Controle ──────────────────────────────────────────────────────────────
     def iniciar_foco(self):
@@ -672,10 +659,10 @@ class PomodoroApp(tk.Tk):
         self._notif_win = None
         self._seg_extra_snapshot = 0
         self._store = SessionStore()
-        self._session_id: int | None = None
+        self._session_id: Optional[int] = None
         self._stats_visivel = False
         self._suggestion_visible = False
-        self._suggestion_mins: int | None = None
+        self._suggestion_mins: Optional[int] = None
 
         self._configurar_janela()
         self._construir_ui()
